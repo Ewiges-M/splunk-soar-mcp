@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "soar": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "fastmcp",
+        "python",
+        "/absolute/path/to/splunk-soar-mcp/server.py"
+      ],
+      "env": {
+        "SOAR_HOST": "https://YOUR-SOAR-HOST",
+        "SOAR_TOKEN": "YOUR-PH-AUTH-TOKEN",
+        "SOAR_OWNER_ID": "1",
+        "SOAR_VERIFY_SSL": "false"
+      }
+    }
+  }
+}
