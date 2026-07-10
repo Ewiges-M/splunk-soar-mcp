@@ -329,8 +329,43 @@ def update_artifact(artifact_id: int, cef: dict) -> dict:
 
 
 @mcp.tool
+def update_container_fields(container_id: int, custom_fields: dict | None = None,
+                            status: str | None = None, name: str | None = None) -> dict:
+    """Update a container's custom_fields / status / name.
+
+    Unlike an artifact's cef, container custom_fields MERGE server-side — sending one key
+    leaves the rest untouched. That is why the Tier-1/Tier-2 agents can write a single AI_*
+    field at a time. Returns the AI_* fields after the write.
+
+    Valid `status` values (note the hyphen — "in progress" is rejected):
+      new, open, closed, resolved, pending, awaiting, inactive, request analysis,
+      task completed, pending approve false positive, open-link, in-progress, canceled
+    Merge semantics, verified 2026-07-10:
+      container.custom_fields  -> merges     (partial write is safe)
+      artifact top-level       -> merges     (name/label/severity)
+      artifact.cef             -> REPLACES   (use update_artifact)
+      asset.configuration      -> REPLACES   (use update_asset)"""
+    body: dict = {}
+    if custom_fields:
+        body["custom_fields"] = custom_fields
+    if status:
+        body["status"] = status
+    if name:
+        body["name"] = name
+    if not body:
+        return {"ok": False, "error": "nothing to update"}
+    st, j = _json(f"/rest/container/{container_id}", body, "POST")
+    _, c = _json(f"/rest/container/{container_id}?_exclude_fields=artifacts")
+    cf = c.get("custom_fields", {}) if isinstance(c, dict) else {}
+    return {"ok": st == 200, "status": st, "response": j,
+            "container_status": c.get("status") if isinstance(c, dict) else None,
+            "ai_fields": {k: v for k, v in cf.items() if k.startswith("AI_")}}
+
+
+@mcp.tool
 def get_custom_list(name: str) -> dict:
-    """Read a SOAR custom list (decided_list) by name."""
+    """Read a SOAR custom list (decided_list) by name — e.g. 'Company', whose row for a
+    tenant holds the customer notification emails in column 3."""
     st, j = _json(f"/rest/decided_list/{urllib.parse.quote(name)}")
     if not isinstance(j, dict):
         return {"status": st, "response": j}
@@ -385,7 +420,7 @@ def run_action(action: str, asset: str, app_id: int, container_id: int,
     """Run a single app action (outside any playbook) and wait for the result.
     `owner` and `app_id` are BOTH mandatory to SOAR and must be sent at the top level AND
     inside the target — omitting either gives "Invalid or missing value for 'owner'" or
-    "app_id has invalid format". Example (safe read-only check):
+    "app_id has invalid format". Safe read-only credential check:
       run_action("get ticket info", "<asset name>", <app_id>, <container_id>, {"ticket_id": "..."})"""
     body = {"action": action, "type": action_type, "container_id": container_id,
             "name": f"mcp {action}", "owner": owner, "app_id": app_id,

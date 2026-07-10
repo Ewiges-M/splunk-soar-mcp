@@ -119,6 +119,7 @@ If `auth_ok` is `false`, the token is wrong or lacks REST access. If the server 
 | `get_container(container_id)` | Key fields + `custom_fields` of one container |
 | `get_artifacts(container_id, limit)` | List artifacts with their full CEF dict |
 | `update_artifact(artifact_id, cef)` | **Merge** keys into an artifact's CEF (a bare POST would silently wipe every other key — this tool reads-then-merges) |
+| `update_container_fields(container_id, custom_fields, status, name)` | Update a container's `custom_fields` / `status` / `name`. Container `custom_fields` **merge server-side**, so partial writes are safe |
 | `add_note(container_id, title, content, note_type)` | Add a note to a container |
 
 ### Playbooks — read & author
@@ -170,6 +171,8 @@ If `auth_ok` is `false`, the token is wrong or lacks REST access. If the server 
 - `import_playbook` always creates a **new** playbook id — it never overwrites by name.
 - REST `DELETE /rest/playbook/{id}` returns **405** — playbooks can only be deleted in the UI.
 - A bare `POST /rest/artifact/{id} {"cef": {...}}` **replaces** the whole CEF and destroys every other key. Same for asset configurations. Use the merge tools here.
+- Write semantics differ per object: container `custom_fields` **merge** (partial write safe), artifact top-level fields (name/label/severity) **merge**, but `artifact.cef` and `asset.configuration` **replace**.
+- Container `status` values are picky — `"in progress"` is rejected; the valid value is `in-progress` (with hyphen).
 - `run_action` requires `owner` and `app_id` **both** at the top level *and* inside the target, or SOAR rejects the request with a misleading error.
 - One `phantom.collect2()` call collects over ONE block — never span two `playbook_input:*` fields in a single datapath list.
 
