@@ -90,6 +90,21 @@ def _build_b64(out_dir: str, name: str) -> str:
     for k in ("prompt2", "launching_user", "action_result.summary.responses"):
         if k in py:
             raise ValueError(f"leftover human-prompt construct in py: {k}")
+    # Envelope guard: a bundle json WITHOUT the "coa" envelope imports as an
+    # un-runnable DRAFT ("Python linting and validation could not be run",
+    # python defaults to 2.7). Verified on SOAR 6.4.1.
+    env = json.loads(jj)
+    coa = env.get("coa")
+    if not isinstance(coa, dict) or "data" not in coa:
+        raise ValueError(
+            'bundle json must use the export envelope: {"blockly":false,"blockly_xml":"<xml></xml>",'
+            '"category":...,"coa":{"data":{nodes,edges,...},"playbook_type":...,"python_version":"3.9",'
+            '"schema":"5.0.20","version":...},"draft_mode":false,"labels":[...],"tags":[]} '
+            "(a flat coa_data / top-level python_version json imports as a draft)")
+    if not str(coa.get("python_version", "")).startswith("3"):
+        raise ValueError(
+            f'coa.python_version must be "3.x" (got {coa.get("python_version")!r}) - '
+            "py2.7 is unsupported on modern SOAR")
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
         for fn, body in [(f"{name}.py", py), (f"{name}.json", jj)]:
@@ -125,6 +140,30 @@ def import_bundle_b64(b64: str, scm: int = 2, force: bool = True) -> dict:
     """Import a pre-built base64 gzip-tarball bundle to SOAR. Returns the raw response."""
     st, body = _json("/rest/import_playbook", {"playbook": b64, "scm": scm, "force": force}, "POST")
     return {"status": st, "response": body}
+
+
+@mcp.tool
+def export_playbook_bundle(playbook_id: int, out_dir: str) -> dict:
+    """Export a playbook's .tgz bundle (GET /rest/playbook/{id}/export) and unpack
+    {name}.py + {name}.json into out_dir - the exact files deploy_playbook() re-imports.
+    This is the edit round-trip: export -> edit -> deploy_playbook (new id, validated)."""
+    r = urllib.request.Request(f"{SOAR_HOST}/rest/playbook/{playbook_id}/export")
+    _auth_header(r)
+    raw = urllib.request.urlopen(r, context=_CTX, timeout=60).read()
+    buf = io.BytesIO(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
+    os.makedirs(out_dir, exist_ok=True)
+    written = []
+    with tarfile.open(fileobj=buf, mode="r") as tar:
+        for m in tar.getmembers():
+            fn = os.path.basename(m.name)
+            if not fn or not m.isfile():
+                continue
+            with open(os.path.join(out_dir, fn), "wb") as f:
+                f.write(tar.extractfile(m).read())
+            written.append(fn)
+    name = next((f[:-5] for f in written if f.endswith(".json")), None)
+    return {"ok": bool(written), "playbook_id": playbook_id, "name": name,
+            "out_dir": out_dir, "files": written}
 
 
 @mcp.tool

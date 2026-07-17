@@ -129,10 +129,13 @@ If `auth_ok` is `false`, the token is wrong or lacks REST access. If the server 
 | `list_playbooks(name_contains, limit)` | Find playbooks by name |
 | `get_playbook(playbook_id)` | Metadata: name, `passed_validation`, type, `input_spec`, active |
 | `get_playbook_source(playbook_id)` | The generated Python + input/output spec — read the real datapaths before transforming a playbook |
-| `deploy_playbook(out_dir, name)` | Build a tgz bundle from `out_dir/{name}.py` + `{name}.json`, validate (AST parse), import, and verify. **Each import creates a NEW playbook id** |
+| `deploy_playbook(out_dir, name)` | Build a tgz bundle from `out_dir/{name}.py` + `{name}.json`, validate (AST parse + envelope guard), import, and verify. **Each import creates a NEW playbook id** |
 | `import_bundle_b64(b64, scm, force)` | Import a pre-built base64 gzip-tarball bundle |
+| `export_playbook_bundle(playbook_id, out_dir)` | Download `/rest/playbook/{id}/export` and unpack `{name}.py` + `{name}.json` into `out_dir` — the edit round-trip starts here |
 
 > **Why bundles?** Modern (`is_modern: true`) playbooks are *not* writable via plain `POST /rest/playbook/{id}` — that endpoint returns `success` but silently changes nothing. `POST /rest/import_playbook` with a tar.gz bundle is the real write path.
+
+> **Envelope matters.** The bundle's `.json` must use the export envelope — top-level `{"blockly":..., "category":..., "coa": {"data": {nodes, edges}, "playbook_type":..., "python_version": "3.9", "schema": "5.0.20", "version":...}, "draft_mode": false, "labels": [...], "tags": []}`. A flat json (top-level `coa_data` / `python_version`) imports as an **un-runnable draft** ("Python linting and validation could not be run", python falls back to 2.7). `_build_b64` now rejects such bundles up front. The safest source of a correct envelope is `export_playbook_bundle()` on any existing playbook.
 
 ### Playbooks & actions — run and debug
 
@@ -160,6 +163,8 @@ If `auth_ok` is `false`, the token is wrong or lacks REST access. If the server 
 
 ```text
 1. Produce out_dir/{NAME}.py and out_dir/{NAME}.json (playbook source + graph)
+   — to EDIT an existing playbook, start with export_playbook_bundle(id, out_dir)
+     and modify those files (correct envelope guaranteed)
 2. deploy_playbook("out_dir", "NAME")            → imported id + passed_validation
 3. run_playbook(container_id, id, {..inputs..})  → playbook_run_id
 4. wait_for_playbook_run(run_id)                 → final status + action runs
